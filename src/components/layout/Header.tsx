@@ -56,7 +56,8 @@ const Header = () => {
           .select('id, name, price, image_url')
           .ilike('name', `%${searchQuery}%`)
           .limit(6);
-        data = retry.data;
+        // Bổ sung image_urls là mảng rỗng để đúng kiểu
+        data = (retry.data || []).map(item => ({ ...item, image_urls: [] }));
       }
       if (active) setSuggestions(data || []);
     };
@@ -198,6 +199,7 @@ const Header = () => {
             {/* User Account Dropdown */}
             <div className="relative">
               <button
+                id="profile-icon"
                 onClick={() => setShowUserDropdown((v) => !v)}
                 onBlur={() => setTimeout(() => setShowUserDropdown(false), 150)}
                 className={`p-2 rounded-full ${

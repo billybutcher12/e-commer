@@ -3,11 +3,12 @@ import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Database } from '../lib/database.types';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Flame as Fire, Star, AlertTriangle, Clock } from 'lucide-react';
+import { Flame as Fire, Star, AlertTriangle, Clock, Heart } from 'lucide-react';
 
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-hot-toast';
 import { useCart } from '../hooks/useCart';
+import { useWishlist } from '../hooks/useWishlist';
 
 // Nút gradient có hiệu ứng sáng theo chuột
 const ButtonGradientGlow = ({ children, onClick, disabled }: { children: React.ReactNode, onClick?: () => void, disabled?: boolean }) => {
@@ -161,6 +162,9 @@ const ProductDetailPage = () => {
   const [selectedSize, setSelectedSize] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [showImageLightbox, setShowImageLightbox] = useState(false);
+  const { isWishlisted, addToWishlist, removeFromWishlist } = useWishlist();
+  const [heartStyle, setHeartStyle] = useState<any>({});
+  const heartBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -364,6 +368,32 @@ const ProductDetailPage = () => {
     toast.success(`${product.name} đã thêm vào giỏ hàng`);
   };
 
+  const handleHeartMouseMove = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setHeartStyle({
+      transform: `scale(1.25) rotate(${(x-rect.width/2)/3}deg) translate(${(x-rect.width/2)/2.5}px, ${(y-rect.height/2)/2.5}px)`,
+      filter: `drop-shadow(0 0 24px #f87171)`,
+      transition: 'transform 0.10s, filter 0.10s'
+    });
+  };
+  const handleHeartMouseLeave = () => setHeartStyle({});
+
+  const handleHeartClick = async () => {
+    if (!user || !product) {
+      toast.error('Vui lòng đăng nhập để sử dụng chức năng yêu thích');
+      return;
+    }
+    if (isWishlisted(product.id)) {
+      await removeFromWishlist(product.id);
+      toast.success('Đã xóa khỏi yêu thích');
+    } else {
+      await addToWishlist(product.id);
+      toast.success('Đã thêm vào yêu thích');
+    }
+  };
+
   return (
     <div className="container mx-auto px-2 md:px-4 py-8 pt-24">
       <div className="max-w-7xl mx-auto">
@@ -399,6 +429,17 @@ const ProductDetailPage = () => {
             <div>
               <h1 className="text-3xl md:text-4xl font-extrabold text-primary-800 mb-2 drop-shadow-lg flex items-center gap-3">
                 {loading ? 'Đang tải...' : product?.name}
+                <button
+                  ref={heartBtnRef}
+                  onClick={handleHeartClick}
+                  onMouseMove={handleHeartMouseMove}
+                  onMouseLeave={handleHeartMouseLeave}
+                  style={heartStyle}
+                  className="ml-2 focus:outline-none relative"
+                  aria-label="Yêu thích"
+                >
+                  <Heart size={28} className={isWishlisted(product?.id || '') ? 'text-red-500 fill-red-500' : 'text-gray-400'} />
+                </button>
                 {badge && (
                   <span className={`inline-flex items-center px-3 py-1 rounded-full font-semibold text-sm ml-2 ${badge.color}`}>{badge.icon}{badge.label}</span>
                 )}

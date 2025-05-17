@@ -316,11 +316,15 @@ const ProductsPage = () => {
       if (error) {
         console.error('Error fetching vouchers:', error);
       } else {
-        // Lọc voucher theo quyền truy cập
-        const filteredVouchers = data?.filter(voucher => {
+        const now = new Date();
+        // Lọc voucher còn hạn sử dụng
+        const filteredVouchers = (data || []).filter(voucher => {
           // Nếu voucher không có user_id hoặc user_id trùng với user hiện tại
-          return !voucher.user_id || voucher.user_id === user?.id;
-        }) || [];
+          const isForUser = !voucher.user_id || voucher.user_id === user?.id;
+          // Nếu không có ngày hết hạn thì luôn hiển thị, còn có thì phải còn hạn
+          const isNotExpired = !voucher.valid_to || new Date(voucher.valid_to) >= now;
+          return isForUser && isNotExpired;
+        });
         setVouchers(filteredVouchers);
       }
       setLoadingVouchers(false);

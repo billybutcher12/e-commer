@@ -1,10 +1,12 @@
 /// <reference types="@types/google.maps" />
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { User, MapPin, ShoppingBag, Heart, KeyRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import defaultAvatar from '../assets/default-avatar.svg';
+import { useWishlist } from '../hooks/useWishlist';
+import { Link } from 'react-router-dom';
 
 const TABS = [
   { key: 'info', label: 'Thông tin cá nhân', icon: <User size={20} /> },
@@ -128,6 +130,58 @@ export default function ProfilePage() {
   const [pwMessage, setPwMessage] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
 
+  const { wishlist, removeFromWishlist, loading: wishlistLoading, fetchWishlist } = useWishlist();
+  const [wishlistProducts, setWishlistProducts] = useState<any[]>([]);
+
+  // Đưa các state/ref hiệu ứng card wishlist ra ngoài map
+  const cardRefs = useRef<{[id: string]: HTMLDivElement | null}>({});
+  const [cardStyles, setCardStyles] = useState<{[id: string]: any}>({});
+  const [hoveredCard, setHoveredCard] = useState<string | null>(null);
+  const [borderPos, setBorderPos] = useState<{[id: string]: {x: number, y: number}}>({});
+
+  const handleCardMouseMove = (productId: string, e: React.MouseEvent<HTMLDivElement>) => {
+    const box = cardRefs.current[productId];
+    if (!box) return;
+    const rect = box.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    setBorderPos(prev => ({ ...prev, [productId]: { x, y } }));
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const rotateY = ((e.clientX - rect.left - centerX) / centerX) * 10;
+    const rotateX = -((e.clientY - rect.top - centerY) / centerY) * 10;
+    setCardStyles(prev => ({
+      ...prev,
+      [productId]: {
+        transform: `perspective(900px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)` ,
+        background: '#fff',
+        transition: 'transform 0.18s cubic-bezier(.25,.46,.45,.94)',
+        border: hoveredCard === productId
+          ? '4px solid transparent'
+          : '4px solid #fff',
+        borderImage: hoveredCard === productId
+          ? `radial-gradient(circle at ${(borderPos[productId]?.x ?? 50)}% ${(borderPos[productId]?.y ?? 50)}%, #a78bfa 0%, #7c3aed 60%, transparent 100%) 1` 
+          : 'none',
+        boxSizing: 'border-box',
+      }
+    }));
+  };
+  const handleCardMouseLeave = (productId: string) => {
+    setHoveredCard(null);
+    setCardStyles(prev => ({
+      ...prev,
+      [productId]: {
+        transform: 'perspective(900px) rotateX(0deg) rotateY(0deg)',
+        background: '#fff',
+        border: '4px solid #fff',
+        borderImage: 'none',
+        transition: 'transform 0.3s, border 0.3s',
+        boxSizing: 'border-box',
+      }
+    }));
+  };
+  const handleCardMouseEnter = (productId: string) => setHoveredCard(productId);
+
   // Thêm hàm fetchUserInfo để đồng bộ dữ liệu user sau khi upload avatar
   const fetchUserInfo = async () => {
     if (!user) return;
@@ -168,6 +222,21 @@ export default function ProfilePage() {
       setAvatarError(false);
     }
   }, [userInfo]);
+
+  useEffect(() => {
+    const fetchWishlistProducts = async () => {
+      if (!user || wishlist.length === 0) {
+        setWishlistProducts([]);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .in('id', wishlist);
+      if (!error && data) setWishlistProducts(data);
+    };
+    fetchWishlistProducts();
+  }, [user, wishlist]);
 
   const handleSelect = async (address: string) => {
     setForm(f => ({ ...f, full_address: address }));
@@ -665,6 +734,18 @@ export default function ProfilePage() {
       setConfirmPassword('');
     }
   };
+
+  // State phân trang cho wishlist
+  const [wishlistPage, setWishlistPage] = useState(1);
+  const wishlistPerPage = 3;
+  const wishlistTotalPages = Math.ceil(wishlistProducts.length / wishlistPerPage);
+  const paginatedWishlist = wishlistProducts.slice((wishlistPage-1)*wishlistPerPage, wishlistPage*wishlistPerPage);
+
+  // State phân trang cho orders
+  const [ordersPage, setOrdersPage] = useState(1);
+  const ordersPerPage = 3;
+  const ordersTotalPages = Math.ceil(orders.length / ordersPerPage);
+  const paginatedOrders = orders.slice((ordersPage-1)*ordersPerPage, ordersPage*ordersPerPage);
 
   return (
     <div className="relative min-h-screen pt-32 pb-12 px-2 md:px-0 bg-gradient-to-br from-blue-100 via-purple-100 to-white overflow-hidden">
@@ -1227,62 +1308,78 @@ export default function ProfilePage() {
                   ) : orders.length === 0 ? (
                     <div className="text-gray-500">Bạn chưa có đơn hàng nào.</div>
                   ) : (
-                    <div className="space-y-6">
-                      {orders.map(order => (
-                        <div key={order.id} className="bg-white rounded-xl shadow p-4 border border-gray-100 cursor-pointer hover:shadow-lg transition"
-                          onClick={() => { setSelectedOrder(order); setShowOrderModal(true); }}
-                        >
-                          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
-                            <div className="font-semibold text-primary-700">Mã đơn: {order.id}</div>
-                            <div className="text-gray-500 text-sm">Ngày: {new Date(order.created_at).toLocaleString('vi-VN')}</div>
-                          </div>
-                          <div className="flex flex-wrap gap-4 items-center mb-2">
-                            <div className="text-sm">Tổng tiền: <span className="font-bold text-primary-600">{order.total_amount?.toLocaleString('vi-VN')}đ</span></div>
-                            <div className="text-sm">Trạng thái: <span className="font-semibold text-blue-600">{order.status}</span></div>
-                            {order.refund_request && (
-                              <div className="text-sm">
-                                Yêu cầu hoàn tiền: 
-                                <span className={`font-semibold ${
-                                  order.refund_status === 'pending' ? 'text-yellow-600' :
-                                  order.refund_status === 'approved' ? 'text-green-600' :
-                                  'text-red-600'
-                                }`}>
-                                  {order.refund_status === 'pending' ? 'Đang chờ duyệt' :
-                                   order.refund_status === 'approved' ? 'Đã duyệt' :
-                                   'Đã từ chối'}
-                                </span>
-                                {/* Nếu đang chờ duyệt thì cho phép hủy yêu cầu */}
-                                {order.refund_status === 'pending' && (
-                                  <button
-                                    type="button"
-                                    onClick={e => { e.stopPropagation(); handleCancelRefundRequest(order.id); }}
-                                    className="ml-2 px-2 py-1 bg-red-100 text-red-600 rounded text-xs font-semibold hover:bg-red-200"
-                                  >Hủy yêu cầu</button>
-                                )}
-                              </div>
+                    <>
+                      <div className="space-y-6">
+                        {paginatedOrders.map(order => (
+                          <div key={order.id} className="bg-white rounded-xl shadow p-4 border border-gray-100 cursor-pointer hover:shadow-lg transition"
+                            onClick={() => { setSelectedOrder(order); setShowOrderModal(true); }}
+                          >
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
+                              <div className="font-semibold text-primary-700">Mã đơn: {order.id}</div>
+                              <div className="text-gray-500 text-sm">Ngày: {new Date(order.created_at).toLocaleString('vi-VN')}</div>
+                            </div>
+                            <div className="flex flex-wrap gap-4 items-center mb-2">
+                              <div className="text-sm">Tổng tiền: <span className="font-bold text-primary-600">{order.total_amount?.toLocaleString('vi-VN')}đ</span></div>
+                              <div className="text-sm">Trạng thái: <span className="font-semibold text-blue-600">{order.status}</span></div>
+                              {order.refund_request && (
+                                <div className="text-sm">
+                                  Yêu cầu hoàn tiền: 
+                                  <span className={`font-semibold ${
+                                    order.refund_status === 'pending' ? 'text-yellow-600' :
+                                    order.refund_status === 'approved' ? 'text-green-600' :
+                                    'text-red-600'
+                                  }`}>
+                                    {order.refund_status === 'pending' ? 'Đang chờ duyệt' :
+                                     order.refund_status === 'approved' ? 'Đã duyệt' :
+                                     'Đã từ chối'}
+                                  </span>
+                                  {/* Nếu đang chờ duyệt thì cho phép hủy yêu cầu */}
+                                  {order.refund_status === 'pending' && (
+                                    <button
+                                      type="button"
+                                      onClick={e => { e.stopPropagation(); handleCancelRefundRequest(order.id); }}
+                                      className="ml-2 px-2 py-1 bg-red-100 text-red-600 rounded text-xs font-semibold hover:bg-red-200"
+                                    >Hủy yêu cầu</button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-sm text-gray-700 mb-2">Sản phẩm:</div>
+                            <ul className="pl-4 list-disc text-sm text-gray-700">
+                              {order.items && Array.isArray(order.items) && order.items.map((item: any, idx: number) => (
+                                <li key={idx}>
+                                  {item.name} x {item.quantity} ({item.price?.toLocaleString('vi-VN')}đ)
+                                </li>
+                              ))}
+                            </ul>
+                            {/* Nút yêu cầu hoàn tiền */}
+                            {order.status === 'confirmed' && !order.refund_request && (
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setSelectedOrder(order); setShowRefundRequestModal(true); }}
+                                className="px-3 py-1 bg-purple-500 text-white rounded hover:bg-purple-600 text-xs font-semibold"
+                              >
+                                Yêu cầu hoàn tiền
+                              </button>
                             )}
                           </div>
-                          <div className="text-sm text-gray-700 mb-2">Sản phẩm:</div>
-                          <ul className="pl-4 list-disc text-sm text-gray-700">
-                            {order.items && Array.isArray(order.items) && order.items.map((item: any, idx: number) => (
-                              <li key={idx}>
-                                {item.name} x {item.quantity} ({item.price?.toLocaleString('vi-VN')}đ)
-                              </li>
-                            ))}
-                          </ul>
-                          {/* Nút yêu cầu hoàn tiền */}
-                          {order.status === 'confirmed' && !order.refund_request && (
+                        ))}
+                      </div>
+                      {/* Phân trang orders */}
+                      {ordersTotalPages > 1 && (
+                        <div className="flex justify-center mt-8 gap-2">
+                          {Array.from({ length: ordersTotalPages }, (_, i) => (
                             <button
-                              type="button"
-                              onClick={e => { e.stopPropagation(); setSelectedOrder(order); setShowRefundRequestModal(true); }}
-                              className="px-3 py-1 bg-purple-500 text-white rounded hover:bg-purple-600 text-xs font-semibold"
+                              key={i+1}
+                              onClick={() => setOrdersPage(i+1)}
+                              className={`w-10 h-10 rounded-lg font-bold ${ordersPage === i+1 ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                             >
-                              Yêu cầu hoàn tiền
+                              {i+1}
                             </button>
-                          )}
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      )}
+                    </>
                   )}
                   {/* Modal chi tiết đơn hàng */}
                   <AnimatePresence>
@@ -1377,7 +1474,71 @@ export default function ProfilePage() {
                   transition={{ type: 'spring', stiffness: 180, damping: 18 }}
                 >
                   <h2 className="text-2xl font-bold mb-4 text-primary-700">Sản phẩm yêu thích</h2>
-                  <div className="text-gray-500">Tính năng này sẽ được bổ sung...</div>
+                  {wishlistLoading ? (
+                    <div className="text-gray-500">Đang tải danh sách yêu thích...</div>
+                  ) : wishlistProducts.length === 0 ? (
+                    <div className="text-gray-500">Bạn chưa có sản phẩm yêu thích nào.</div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8">
+                        {paginatedWishlist.map(product => (
+                          <div
+                            key={product.id}
+                            ref={el => cardRefs.current[product.id] = el}
+                            className="bg-white rounded-2xl shadow-xl p-6 flex flex-col items-center relative group w-full max-w-xs mx-auto min-h-[420px]"
+                            style={cardStyles[product.id]}
+                            onMouseMove={e => handleCardMouseMove(product.id, e)}
+                            onMouseLeave={() => handleCardMouseLeave(product.id)}
+                            onMouseEnter={() => handleCardMouseEnter(product.id)}
+                          >
+                            <motion.button
+                              onClick={async () => {
+                                await removeFromWishlist(product.id);
+                                fetchWishlist();
+                              }}
+                              className="absolute top-3 right-3 text-red-500 hover:text-red-700 z-10"
+                              title="Bỏ yêu thích"
+                              whileHover={{ scale: 1.2 }}
+                              whileTap={{ scale: 0.9 }}
+                            >
+                              <Heart size={28} className="fill-red-500" />
+                            </motion.button>
+                            <motion.img
+                              src={product.image_url || (Array.isArray(product.image_urls) && product.image_urls.length > 0 ? product.image_urls[0] : 'https://via.placeholder.com/300x300?text=No+Image')}
+                              alt={product.name}
+                              className="w-40 h-40 object-cover rounded-xl mb-3 border"
+                              whileHover={{ scale: 1.1 }}
+                              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                            />
+                            <div className="font-semibold text-primary-700 text-center line-clamp-2 mb-2 text-lg">{product.name}</div>
+                            <div className="text-primary-600 font-bold mb-3 text-xl">{product.price?.toLocaleString('vi-VN', { style: 'currency', currency: 'VND' })}</div>
+                            <div className="flex-1" />
+                            <motion.div
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              className="w-full flex justify-center"
+                            >
+                              <Link to={`/products/${product.id}`} className="mt-auto px-5 py-2 bg-primary-500 text-white rounded-lg font-semibold shadow hover:bg-primary-600 transition-all text-base w-full text-center">Xem chi tiết</Link>
+                            </motion.div>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Phân trang wishlist */}
+                      {wishlistTotalPages > 1 && (
+                        <div className="flex justify-center mt-8 gap-2">
+                          {Array.from({ length: wishlistTotalPages }, (_, i) => (
+                            <button
+                              key={i+1}
+                              onClick={() => setWishlistPage(i+1)}
+                              className={`w-10 h-10 rounded-lg font-bold ${wishlistPage === i+1 ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                            >
+                              {i+1}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </motion.div>
               )}
 
